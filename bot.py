@@ -19,6 +19,29 @@ searcher = StatutSearch(
 )
 
 
+def _build_embed(pytanie: str, wynik: dict) -> discord.Embed:
+    tekst = wynik["odpowiedz"]
+
+    # jeśli Gemini zwrócił "Cytat:" – rozdziel odpowiedź od cytatu
+    if "Cytat:" in tekst:
+        czesci = tekst.split("Cytat:", 1)
+        odpowiedz = czesci[0].strip()
+        cytat = czesci[1].strip()
+    else:
+        odpowiedz = tekst
+        cytat = None
+
+    embed = discord.Embed(
+        title=f"📖 {pytanie[:100]}",
+        description=odpowiedz[:1024] if odpowiedz else None,
+        color=discord.Color.blue(),
+    )
+    if cytat:
+        embed.add_field(name="📜 Statut mówi:", value=f"*{cytat[:1000]}*", inline=False)
+    embed.set_footer(text=f"Źródło: {wynik['zrodlo']}")
+    return embed
+
+
 @bot.event
 async def on_ready():
     print(f"Becia gotowa! Zalogowano jako {bot.user}")
@@ -29,12 +52,7 @@ async def on_ready():
 async def szukaj(ctx, *, pytanie: str):
     await ctx.defer()
     wynik = await searcher.odpowiedz(pytanie, gemini_key=GEMINI_KEY)
-    embed = discord.Embed(
-        title=f"📖 {pytanie[:100]}",
-        description=wynik["odpowiedz"],
-        color=discord.Color.blue(),
-    )
-    embed.set_footer(text=f"Źródło: {wynik['zrodlo']}")
+    embed = _build_embed(pytanie, wynik)
     await ctx.reply(embed=embed)
 
 
@@ -68,12 +86,7 @@ async def on_message(message):
         if content:
             async with message.channel.typing():
                 wynik = await searcher.odpowiedz(content, gemini_key=GEMINI_KEY)
-                embed = discord.Embed(
-                    title=f"📖 {content[:100]}",
-                    description=wynik["odpowiedz"],
-                    color=discord.Color.blue(),
-                )
-                embed.set_footer(text=f"Źródło: {wynik['zrodlo']}")
+                embed = _build_embed(content, wynik)
                 await message.reply(embed=embed)
         else:
             await message.reply("Hej! Zapytaj mnie o coś ze statutu, np. `!szukaj jakie są prawa ucznia?`")

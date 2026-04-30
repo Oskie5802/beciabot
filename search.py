@@ -152,24 +152,56 @@ class StatutSearch:
             except Exception as e:
                 print(f"Gemini error: {e}")
 
-        # fallback: return best matching fragment
-        best = hits[0]["text"]
-        if len(best) > 1800:
-            best = best[:1800] + "…"
+        # fallback: wyciągnij najbardziej trafne zdania z najlepszego fragmentu
+        cytat = _wyciagnij_cytat(hits[0]["text"], _extract_keywords(query))
         return {
-            "odpowiedz": f"**Znalazłem w statucie:**\n\n{best}",
+            "odpowiedz": f"> {cytat}",
             "zrodlo": source_str,
         }
+
+
+def _wyciagnij_cytat(chunk: str, keywords: list, max_len: int = 400) -> str:
+    """Zwraca 1-3 najlepiej pasujące zdania z fragmentu zamiast całego bloku."""
+    # podziel na zdania
+    zdania = re.split(r"(?<=[.!?;])\s+", chunk)
+    scored = []
+    for z in zdania:
+        z = z.strip()
+        if len(z) < 15:
+            continue
+        sc = sum(1 for kw in keywords if kw in _normalize(z))
+        scored.append((sc, z))
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # weź najlepsze zdania mieszczące się w limicie
+    result = []
+    total = 0
+    for sc, z in scored:
+        if sc == 0 and result:
+            break
+        if total + len(z) > max_len and result:
+            break
+        result.append(z)
+        total += len(z)
+        if len(result) >= 3:
+            break
+
+    if not result:
+        return chunk[:max_len] + ("…" if len(chunk) > max_len else "")
+    return " ".join(result)
 
 
 async def _ask_gemini(api_key: str, query: str, context: str) -> str:
     client = genai.Client(api_key=api_key)
 
-    prompt = f"""Jesteś pomocnym asystentem szkolnym. Odpowiadasz na pytania uczniów dotyczące statutu szkoły.
-Odpowiedz na pytanie NA PODSTAWIE PONIŻSZYCH FRAGMENTÓW STATUTU.
-Odpowiadaj po polsku, krótko i konkretnie. Cytuj przepisy jeśli to potrzebne.
-Jeśli nie możesz znaleźć odpowiedzi w podanych fragmentach, powiedz o tym wprost.
-Nie wymyślaj informacji spoza statutu.
+    prompt = f"""Jesteś pomocnym asystentem szkolnym. Odpowiadasz na pytania uczniów o statucie szkoły.
+
+ZASADY:
+- Odpowiedź max 3 zdania – krótko i konkretnie.
+- Potem dodaj JEDEN dokładny cytat ze statutu (zacytuj dosłownie, bez skracania) poprzedzony słowem „Cytat:".
+- Jeśli pytanie dotyczy listy (np. prawa ucznia), podaj listę punktów, ale bez przytaczania całego rozdziału.
+- Jeśli odpowiedzi nie ma w podanych fragmentach, napisz tylko: „Nie znalazłem tej informacji w statucie."
+- Nie wymyślaj, nie dodawaj nic spoza statutu.
 
 FRAGMENTY STATUTU:
 {context[:3500]}
